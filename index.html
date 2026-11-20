@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>My Navi</title>
+  <link rel="stylesheet" href="https://unpkg.com" />
+  <style>
+    body, html { margin: 0; padding: 0; width: 100%; height: 100vh; font-family: sans-serif; background: #111; color: #fff; overflow: hidden; }
+    #map { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; z-index: 1; background: #222; }
+    #ui-top { position: fixed; top: 15px; left: 10px; right: 10px; z-index: 1000; background: rgba(0,0,0,0.85); padding: 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 8px; }
+    #status { font-size: 16px; font-weight: bold; color: #4ade80; text-align: center; }
+    .controls { display: flex; gap: 6px; }
+    input { flex: 1; padding: 10px; border-radius: 8px; border: none; font-size: 15px; color: #000; background: #fff; }
+    button { padding: 10px 14px; border-radius: 8px; border: none; font-weight: bold; font-size: 14px; cursor: pointer; background: #2563eb; color: #fff; }
+    #btn-start { background: #16a34a; width: 100%; font-size: 16px; padding: 12px; }
+  </style>
+</head>
+<body>
+
+<div id="ui-top">
+  <div id="status">「ナビ起動」を押してください</div>
+  <button id="btn-start" onclick="initNavi()">① ナビ起動（音声ロック解除）</button>
+  <div class="controls" id="search-box" style="display:none;">
+    <input type="text" id="dest-input" placeholder="目的地を入力（例：長崎駅）">
+    <button onclick="searchRoute()">ルート検索</button>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com"></script>
+<script>
+  let map, userMarker, routeLine;
+  let currentPos = null;
+  let routeSteps = [];
+  let currentStepIndex = 0;
+  let announcedFlags = {};
+  let isNavigating = false;
+
+  function playAudioQueue(files) {
+    if (!files || files.length === 0) return;
+    let index = 0;
+    function next() {
+      if (index >= files.length) return;
+      const audio = new Audio(files[index]);
+      index++;
+      audio.onended = next;
+      audio.onerror = () => next();
+      audio.play().catch(() => {});
+    }
+    next();
+  }
+
+  function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3;
+    const p1 = lat1 * Math.PI / 180;
+    const p2 = lat2 * Math.PI / 180;
+    const dp = (lat2 - lat1) * Math.PI / 180;
+    const dl = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dp/2) * Math.sin(dp/2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl/2) * Math.sin(dl/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  window.onload = function() {
+    map = L.map('map', { zoomControl: false }).setView([32.7503, 129.8777], 16);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+    setTimeout(() => { map.invalidateSize(); }, 500);
+  };
+
+  function initNavi() {
+    document.getElementById('btn-start').style.display = 'none';
+    document.getElementById('search-box').style.display = 'flex';
+    document.getElementById('status').innerText = "現在地を取得中...";
+
+    playAudioQueue(['Start_navigarion.mp3', 'Safety_Driving.mp3']);
+
+    if ('wakeLock' in navigator) {
+      navigator.wakeLock.request('screen').catch(() => {});
+    }
+
+    if (navigator.geolocation) {
+      // まず屋内でも素早く現在地を取得
+      navigator.geolocation.getCurrentPosition(pos => {
+        updatePosition(pos);
+        // 取得できたら高精度な連続追跡を開始
+        navigator.geolocation.watchPosition(updatePosition, () => {}, {
+          enableHighAccuracy: true, maximumAge: 3000, timeout: 30000
+        });
+      }, err => {
+        document.getElementById('status').innerText = "測位エラー(" + err.code + "): 窓際でお試しください";
+      }, { enableHighAccuracy: false, maximumAge: 10000, timeout: 20000 });
+    } else {
+      document.getElementById('status').innerText = "GPS非対応の画面です";
+    }
+  }
+
+  function updatePosition(pos) {
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    currentPos = [lat, lng];
+
+    if (!userMarker) {
+      userMarker = L.circleMarker(currentPos, { radius: 9, color: '#fff', fillColor: '#2563eb', fillOpacity: 1, weight: 3 }).addTo(map);
+      map.setView(currentPos, 17);
+      if (!isNavigating) document.getElementById('status').innerText = "現在地を取得しました！";
+    } else {
+      userMarker.setLatLng(currentPos);
+      map.panTo(currentPos);
+    }
+
+    if (isNavigating && routeSteps.length > 0) {
+      checkNavigation(lat, lng);
+    }
+  }
+
+  async function searchRoute() {
+    const query = document.getElementById('dest-input').value;
+    if (!query) return alert("目的地を入力してください");
+    if (!currentPos) {
+      // 測位前でもテストできるよう仮座標（長崎駅周辺）をセット
+      currentPos = [32.7525, 129.8705];
+    }
+
+    document.getElementById('status').innerText = "ルート検索中...";
+    try {
+      const geoRes = await fetch(`https://openstreetmap.org{encodeURIComponent(query)}&limit=1`);
+      const geoData = await geoRes.json();
+      if (!geoData.length) {
+        document.getElementById('status').innerText = "目的地が見つかりませんでした";
+        return;
+      }
+      const destLat = geoData[0].lat;
+      const destLon = geoData[0].lon;
+
+      const routeRes = await fetch(`https://project-osrm.org{currentPos[1]},${currentPos[0]};${destLon},${destLat}?overview=full&geometries=geojson&steps=true`);
+      const routeData = await routeRes.json();
+
+      if (routeData.routes && routeData.routes.length > 0) {
+        const route = routeData.routes[0];
+        if (routeLine) map.removeLayer(routeLine);
+        routeLine = L.geoJSON(route.geometry, { style: { color: '#3b82f6', weight: 7 } }).addTo(map);
+        map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
+
+        routeSteps = route.legs[0].steps;
+        currentStepIndex = 1;
+        announcedFlags = {};
+        isNavigating = true;
+
+        document.getElementById('status').innerText = "案内を開始します";
+        playAudioQueue(['Route_Setup_Complete.mp3', 'Follow_Road.mp3']);
+      }
+    } catch (e) {
+      document.getElementById('status').innerText = "通信エラーが発生しました";
+    }
+  }
+
+  function checkNavigation(lat, lng) {
+    if (currentStepIndex >= routeSteps.length) return;
+
+    const step = routeSteps[currentStepIndex];
+    const targetLon = step.maneuver.location[0];
+    const targetLat = step.maneuver.location[1];
+    const dist = Math.round(getDistance(lat, lng, targetLat, targetLon));
+
+    const actionFile = getActionAudio(step.maneuver);
+    document.getElementById('status').innerText = `次の案内まで 約${dist}m`;
+
+    if (step.maneuver.type === 'arrive' && dist <= 40 && !announcedFlags['arrive']) {
+      announcedFlags['arrive'] = true;
+      isNavigating = false;
+      document.getElementById('status').innerText = "目的地周辺に到着しました";
+      playAudioQueue(['Destination_arrived.mp3']);
+      return;
+    }
+
+    const thresholds = [
+      { d: 1500, file: '1.5km.mp3' },
+      { d: 1000, file: '1km.mp3' },
+      { d: 800,  file: '800m.mp3' },
+      { d: 400,  file: '400m.mp3' },
+      { d: 200,  file: '200m.mp3' }
+    ];
+
+    for (let t of thresholds) {
+      const key = `${currentStepIndex}_${t.d}`;
+      if (dist <= t.d && dist > t.d - 80 && !announcedFlags[key]) {
+        announcedFlags[key] = true;
+        if (actionFile) playAudioQueue([t.file, actionFile]);
+        break;
+      }
+    }
+
+    const turnKey = `${currentStepIndex}_turn`;
+    if (dist <= 40 && !announcedFlags[turnKey]) {
+      announcedFlags[turnKey] = true;
+      if (actionFile) playAudioQueue([actionFile]);
+      currentStepIndex++;
+    }
+  }
+
+  function getActionAudio(maneuver) {
+    const mod = maneuver.modifier || '';
+    if (mod.includes('uturn')) return 'U_Turn.mp3';
+    if (mod.includes('left')) return 'TurnLeft.mp3';
+    if (mod.includes('right')) return 'TurnRight.mp3';
+    if (maneuver.type === 'continue' || mod.includes('straight')) return 'Follow_Road.mp3';
+    return null;
+  }
+</script>
+</body>
+</html>
