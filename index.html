@@ -9,7 +9,7 @@
     body, html { margin: 0; padding: 0; width: 100%; height: 100vh; font-family: sans-serif; background: #111; color: #fff; overflow: hidden; }
     #map { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; z-index: 1; background: #222; }
     #ui-top { position: fixed; top: 15px; left: 10px; right: 10px; z-index: 1000; background: rgba(0,0,0,0.85); padding: 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 8px; }
-    #status { font-size: 16px; font-weight: bold; color: #4ade80; text-align: center; }
+    #status { font-size: 15px; font-weight: bold; color: #4ade80; text-align: center; }
     .controls { display: flex; gap: 6px; }
     input { flex: 1; padding: 10px; border-radius: 8px; border: none; font-size: 15px; color: #000; background: #fff; }
     button { padding: 10px 14px; border-radius: 8px; border: none; font-weight: bold; font-size: 14px; cursor: pointer; background: #2563eb; color: #fff; }
@@ -22,8 +22,8 @@
   <div id="status">「ナビ起動」を押してください</div>
   <button id="btn-start" onclick="initNavi()">① ナビ起動（音声ロック解除）</button>
   <div class="controls" id="search-box" style="display:none;">
-    <input type="text" id="dest-input" placeholder="目的地（例：長崎駅、稲佐山など）">
-    <button onclick="searchRoute()">ルート検索</button>
+    <input type="text" id="dest-input" placeholder="目的地名 または 地図をタップ">
+    <button onclick="searchRoute()">検索</button>
   </div>
 </div>
 
@@ -31,7 +31,7 @@
 
 <script src="https://unpkg.com"></script>
 <script>
-  let map, userMarker, routeLine;
+  let map, userMarker, destMarker, routeLine;
   let currentPos = null;
   let routeSteps = [];
   let currentStepIndex = 0;
@@ -63,17 +63,25 @@
   }
 
   window.onload = function() {
-    map = L.map('map', { zoomControl: false }).setView([32.7525, 129.8705], 16);
+    map = L.map('map', { zoomControl: false }).setView([32.7525, 129.8705], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap'
     }).addTo(map);
     setTimeout(() => { map.invalidateSize(); }, 500);
+
+    // 地図をタップした場所を直接目的地にしてルート検索する機能
+    map.on('click', function(e) {
+      if (document.getElementById('search-box').style.display === 'none') return;
+      const lat = e.latlng.lat;
+      const lon = e.latlng.lng;
+      calcRouteToCoords(lat, lon);
+    });
   };
 
   function initNavi() {
     document.getElementById('btn-start').style.display = 'none';
     document.getElementById('search-box').style.display = 'flex';
-    document.getElementById('status').innerText = "現在地を取得中...";
+    document.getElementById('status').innerText = "現在地を取得中...（地図タップでも目的地設定可）";
 
     playAudioQueue(['Start_navigarion.mp3', 'Safety_Driving.mp3']);
 
@@ -83,8 +91,8 @@
 
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(updatePosition, err => {
-        document.getElementById('status').innerText = "GPS待機中（目的地検索は可能です）";
-      }, { enableHighAccuracy: false, maximumAge: 15000, timeout: 30000 });
+        document.getElementById('status').innerText = "GPS待機中（地図をタップして目的地設定できます）";
+      }, { enableHighAccuracy: false, maximumAge: 30000, timeout: 30000 });
     }
   }
 
@@ -107,38 +115,40 @@
     }
   }
 
-  // SafariからCORS制限なしで通信できるジオコーディング（Photon API）
-  async function getCoordinates(query) {
-    const url = `https://komoot.io{encodeURIComponent(query)}&limit=1`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data && data.features && data.features.length > 0) {
-      const coords = data.features.geometry.coordinates;
-      return { lon: coords, lat: coords };
-    }
-    return null;
-  }
-
   async function searchRoute() {
     const query = document.getElementById('dest-input').value.trim();
-    if (!query) return alert("目的地を入力してください");
+    if (!query) return alert("目的地を入力するか、地図をタップしてください");
+
+    document.getElementById('status').innerText = "場所を検索中...";
+    try {
+      const url = `https://openstreetmap.org{encodeURIComponent(query)}&limit=1`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data || data.length === 0) {
+        document.getElementById('status').innerText = "見つかりません。地図を直接タップしてください";
+        return;
+      }
+      const destLat = parseFloat(data.lat);
+      const destLon = parseFloat(data.lon);
+      calcRouteToCoords(destLat, destLon);
+    } catch (e) {
+      document.getElementById('status').innerText = "検索通信制限：地図上の目的地を直接タップしてください";
+    }
+  }
+
+  async function calcRouteToCoords(destLat, destLon) {
     if (!currentPos) {
       currentPos = [32.7525, 129.8705]; // 未測位時の仮スタート（長崎駅）
     }
 
-    document.getElementById('status').innerText = "目的地を検索中...";
-    try {
-      const dest = await getCoordinates(query);
-      if (!dest) {
-        document.getElementById('status').innerText = "目的地が見つかりませんでした";
-        return;
-      }
+    if (destMarker) map.removeLayer(destMarker);
+    destMarker = L.marker([destLat, destLon]).addTo(map);
 
-      document.getElementById('status').innerText = "ルートを計算中...";
+    document.getElementById('status').innerText = "ルートを計算中...";
+    try {
       const startLon = currentPos;
       const startLat = currentPos;
-
-      const routeUrl = `https://project-osrm.org{startLon},${startLat};${dest.lon},${dest.lat}?overview=full&geometries=geojson&steps=true`;
+      const routeUrl = `https://project-osrm.org{startLon},${startLat};${destLon},${destLat}?overview=full&geometries=geojson&steps=true`;
       const routeRes = await fetch(routeUrl);
       const routeData = await routeRes.json();
 
@@ -159,7 +169,7 @@
         document.getElementById('status').innerText = "ルートが見つかりませんでした";
       }
     } catch (e) {
-      document.getElementById('status').innerText = "通信エラー: " + e.message;
+      document.getElementById('status').innerText = "ルート計算エラー: " + e.message;
     }
   }
 
