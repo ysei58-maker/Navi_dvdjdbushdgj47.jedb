@@ -24,6 +24,7 @@ button{padding:9px 10px;border-radius:8px;border:none;font-weight:bold;font-size
 #zb{position:fixed;bottom:30px;right:15px;z-index:10;display:flex;flex-direction:column;gap:8px;align-items:center}
 .z{width:46px;height:46px;font-size:20px;border-radius:50%;background:rgba(0,0,0,.85);border:1px solid #666;display:flex;align-items:center;justify-content:center}
 #btn-m{font-size:12px;background:#0f172a;border:1px solid #38bdf8;color:#38bdf8}
+#btn-g{font-size:18px;background:#2563eb;border:2px solid #fff;color:#fff}
 </style>
 </head>
 <body>
@@ -42,15 +43,22 @@ button{padding:9px 10px;border-radius:8px;border:none;font-weight:bold;font-size
   </div>
 </div>
 <canvas id="c"></canvas>
-<div id="zb"><button class="z" id="btn-m" onclick="tgl()">標準</button><button class="z" onclick="zm(1)">＋</button><button class="z" onclick="zm(-1)">－</button></div>
+<div id="zb">
+  <button class="z" id="btn-g" onclick="rec()">◎</button>
+  <button class="z" id="btn-m" onclick="tgl()">標準</button>
+  <button class="z" onclick="zm(1)">＋</button>
+  <button class="z" onclick="zm(-1)">－</button>
+</div>
 <script>
 document.addEventListener('dblclick',e=>e.preventDefault(),{passive:false});
 const c=document.getElementById('c'),ctx=c.getContext('2d'),I_LAT=32.7525,I_LON=129.8705;
-let tc={},cLat=I_LAT,cLon=I_LON,z=16,md='photo',gLat=null,gLon=null,wid=null,dLat=null,dLon=null,rc=[],rs=[],si=0,af={},nav=false,tOk=0,tEr=0,gSt='未開始',aSt='待機';
+let tc={},cLat=I_LAT,cLon=I_LON,z=16,md='photo',gLat=null,gLon=null,wid=null,dLat=null,dLon=null,rc=[],rs=[],si=0,af={},nav=false,flw=true,tOk=0,tEr=0,gSt='未開始',aSt='待機';
 const rsz=()=>{c.width=document.documentElement.clientWidth||innerWidth||390;c.height=document.documentElement.clientHeight||innerHeight||844;drw()};
 addEventListener('load',rsz);addEventListener('resize',rsz);setTimeout(rsz,100);
 const zm=d=>{z=Math.max(5,Math.min(18,z+d));drw()};
 const tgl=()=>{md=(md==='photo')?'std':'photo';document.getElementById('btn-m').innerText=(md==='photo')?'標準':'航空';tc={};tOk=0;tEr=0;udg();drw()};
+const updFlw=()=>{const b=document.getElementById('btn-g');b.style.background=flw?'#2563eb':'rgba(0,0,0,.85)';b.style.borderColor=flw?'#fff':'#666'};
+const rec=()=>{flw=true;updFlw();if(gLat!==null&&gLon!==null){cLat=gLat;cLon=gLon}else{cLat=I_LAT;cLon=I_LON}drw()};
 const l2t=(l,z)=>(l+180)/360*2**z, a2t=(a,z)=>(1-Math.log(Math.tan(a*Math.PI/180)+1/Math.cos(a*Math.PI/180))/Math.PI)/2*2**z;
 const t2l=(x,z)=>x/2**z*360-180, t2a=(y,z)=>180/Math.PI*Math.atan(.5*(Math.exp(Math.PI-2*Math.PI*y/2**z)-Math.exp(-(Math.PI-2*Math.PI*y/2**z))));
 const ll2s=(a,l)=>({x:c.width/2+(l2t(l,z)-l2t(cLon,z))*256,y:c.height/2+(a2t(a,z)-a2t(cLat,z))*256});
@@ -74,7 +82,11 @@ const udg=()=>{document.getElementById('dg').innerText=`${md==='photo'?'航空�
 
 let dr=false,sx=0,sy=0,mv=false;
 c.onpointerdown=e=>{dr=true;mv=false;sx=e.clientX;sy=e.clientY};
-c.onpointermove=e=>{if(!dr)return;if(Math.abs(e.clientX-sx)>5||Math.abs(e.clientY-sy)>5)mv=true;const n=s2ll(c.width/2-(e.clientX-sx),c.height/2-(e.clientY-sy));cLat=n.lat;cLon=n.lon;sx=e.clientX;sy=e.clientY;drw()};
+c.onpointermove=e=>{
+  if(!dr)return;
+  if(Math.abs(e.clientX-sx)>5||Math.abs(e.clientY-sy)>5){mv=true;if(flw){flw=false;updFlw()}}
+  const n=s2ll(c.width/2-(e.clientX-sx),c.height/2-(e.clientY-sy));cLat=n.lat;cLon=n.lon;sx=e.clientX;sy=e.clientY;drw();
+};
 c.onpointerup=e=>{
   dr=false;
   if(!mv&&document.getElementById('pn').style.display!=='none'){
@@ -88,12 +100,23 @@ function ply(f){let i=0;const nx=()=>{if(i>=f.length){aSt='再生完了';return 
 const dst=(a1,l1,a2,l2)=>6371e3*2*Math.atan2(Math.sqrt(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2),Math.sqrt(1-(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2)));
 
 function init(){rsz();document.getElementById('btn-s').style.display='none';document.getElementById('pn').style.display='flex';document.getElementById('st').innerText="目的地を検索するか地図をタップしてください";ply(['Start_navigarion.mp3','Safety_Driving.mp3']);navigator.wakeLock?.request('screen').catch(()=>{});gps()}
-function gps(){if(!navigator.geolocation){gSt='非対応';return udg()}if(wid!==null)navigator.geolocation.clearWatch(wid);gSt='測位中...';udg();wid=navigator.geolocation.watchPosition(p=>{gLat=cLat=p.coords.latitude;gLon=cLon=p.coords.longitude;gSt=`取得済(精度${Math.round(p.coords.accuracy)}m)`;udg();drw();if(nav&&rs.length)chk(gLat,gLon)},e=>{gSt=`失敗(${e.code})`;udg()},{enableHighAccuracy:true,maximumAge:5000,timeout:15000})}
+function gps(){
+  if(!navigator.geolocation){gSt='非対応';return udg()}
+  if(wid!==null)navigator.geolocation.clearWatch(wid);
+  gSt='測位中...';udg();
+  wid=navigator.geolocation.watchPosition(p=>{
+    gLat=p.coords.latitude;gLon=p.coords.longitude;
+    if(flw){cLat=gLat;cLon=gLon}
+    gSt=`取得済(精度${Math.round(p.coords.accuracy)}m)`;
+    udg();drw();
+    if(nav&&rs.length)chk(gLat,gLon);
+  },e=>{gSt=`失敗(${e.code})`;udg()},{enableHighAccuracy:true,maximumAge:5000,timeout:15000});
+}
 
 function cnl(){
   nav=false;dLat=null;dLon=null;rc=[];rs=[];si=0;af={};
   document.getElementById('res').style.display='none';
-  drw();
+  rec();
   document.getElementById('st').innerText="ルート案内を中止しました";
   ply(['Route_Cancel.mp3']);
 }
@@ -122,7 +145,7 @@ async function find(){
 }
 
 async function go(da,dl){
-  dLat=da;dLon=dl;drw();
+  dLat=da;dLon=dl;rec();
   const sA=gLat??I_LAT,sL=gLon??I_LON;
   document.getElementById('st').innerText="ルート計算中...";
   const url='https://'+'router.project-osrm.org'+'/route/v1/driving/'+`${sL.toFixed(6)},${sA.toFixed(6)};${dl.toFixed(6)},${da.toFixed(6)}?overview=full&geometries=geojson&steps=true`;
