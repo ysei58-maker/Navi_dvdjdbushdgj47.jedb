@@ -3,96 +3,192 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>My Navi</title>
+<title>My Navi Prototype</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body,html{width:100%;height:100%;font-family:sans-serif;background:#111;color:#fff;overflow:hidden}
 #c{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:1;touch-action:none;display:block}
-#ui{position:fixed;top:15px;left:10px;right:10px;z-index:10;background:rgba(0,0,0,.88);padding:12px;border-radius:12px;display:flex;flex-direction:column;gap:8px}
-#st{font-size:15px;font-weight:bold;color:#4ade80;text-align:center}
+#ui{position:fixed;top:12px;left:10px;right:10px;z-index:10;background:rgba(0,0,0,.9);padding:12px;border-radius:12px;display:flex;flex-direction:column;gap:8px;border:1px solid #333}
+#st{font-size:14px;font-weight:bold;color:#4ade80;text-align:center}
+#diag{font-size:11px;color:#cbd5e1;background:#1e293b;padding:6px;border-radius:6px;line-height:1.4}
 .row{display:flex;gap:6px}
-input{flex:1;padding:10px;border-radius:8px;border:none;font-size:15px;color:#000;background:#fff}
-button{padding:10px 14px;border-radius:8px;border:none;font-weight:bold;font-size:14px;background:#2563eb;color:#fff}
-#btn-s{background:#16a34a;width:100%;font-size:16px;padding:12px}
+input{flex:1;padding:9px;border-radius:8px;border:none;font-size:14px;color:#000;background:#fff}
+button{padding:9px 12px;border-radius:8px;border:none;font-weight:bold;font-size:13px;background:#2563eb;color:#fff}
+#btn-s{background:#16a34a;width:100%;font-size:15px;padding:11px}
+.btn-sub{background:#475569;flex:1}
 #zb{position:fixed;bottom:30px;right:15px;z-index:10;display:flex;flex-direction:column;gap:8px}
-.z{width:44px;height:44px;font-size:22px;border-radius:50%;background:rgba(0,0,0,.8);border:1px solid #555}
+.z{width:44px;height:44px;font-size:22px;border-radius:50%;background:rgba(0,0,0,.85);border:1px solid #555}
 </style>
 </head>
 <body>
 <div id="ui">
-  <div id="st">「ナビ起動」を押してください</div>
-  <button id="btn-s" onclick="init()">① ナビ起動（音声ロック解除）</button>
-  <div class="row" id="sb" style="display:none">
-    <input id="inp" placeholder="目的地名 または 地図タップ">
-    <button onclick="find()">検索</button>
+  <div id="st">準備完了：「ナビ起動」を押してください</div>
+  <div id="diag">状態: 待機中 | 地図タイル: 未確認 | GPS: 未開始</div>
+  <button id="btn-s" onclick="init()">① ナビ起動（音声・GPS開始）</button>
+  <div id="panel" style="display:none;flex-direction:column;gap:6px">
+    <div class="row">
+      <input id="inp" placeholder="目的地（例：長崎駅）または地図タップ">
+      <button onclick="find()">検索</button>
+    </div>
+    <div class="row">
+      <button class="btn-sub" onclick="runSim()">疑似ルート音声テスト</button>
+      <button class="btn-sub" onclick="startGps()">GPS再取得</button>
+    </div>
   </div>
 </div>
 <canvas id="c"></canvas>
 <div id="zb"><button class="z" onclick="zm(1)">＋</button><button class="z" onclick="zm(-1)">－</button></div>
+
 <script>
 const c=document.getElementById('c'),ctx=c.getContext('2d'),tc={};
-let cLat=32.7525,cLon=129.8705,z=15,uLat=null,uLon=null,dLat=null,dLon=null,rc=[],rs=[],si=0,af={},nav=false;
+// 初期表示座標（長崎駅周辺・GPS未取得時の基準点）
+const INIT_LAT=32.7525, INIT_LON=129.8705;
+let cLat=INIT_LAT, cLon=INIT_LON, z=15;
+let gpsLat=null, gpsLon=null, watchId=null;
+let dLat=null, dLon=null, rc=[], rs=[], si=0, af={}, nav=false;
+let tileOk=0, tileErr=0, gpsStat='未開始', audioStat='待機';
+
 const rsz=()=>{c.width=document.documentElement.clientWidth||window.innerWidth||390;c.height=document.documentElement.clientHeight||window.innerHeight||844;drw()};
 window.addEventListener('load',rsz);window.addEventListener('resize',rsz);setTimeout(rsz,100);
 const zm=d=>{z=Math.max(5,Math.min(18,z+d));drw()};
-const l2t=(l,z)=>(l+180)/360*2**z, a2t=(a,z)=>(1-Math.log(Math.tan(a*Math.PI/180)+1/Math.cos(a*Math.PI/180))/Math.PI)/2*2**z;
-const t2l=(x,z)=>x/2**z*360-180, t2a=(y,z)=>180/Math.PI*Math.atan(.5*(Math.exp(Math.PI-2*Math.PI*y/2**z)-Math.exp(-(Math.PI-2*Math.PI*y/2**z))));
+
+const l2t=(l,z)=>(l+180)/360*2**z;
+const a2t=(a,z)=>(1-Math.log(Math.tan(a*Math.PI/180)+1/Math.cos(a*Math.PI/180))/Math.PI)/2*2**z;
+const t2l=(x,z)=>x/2**z*360-180;
+const t2a=(y,z)=>180/Math.PI*Math.atan(.5*(Math.exp(Math.PI-2*Math.PI*y/2**z)-Math.exp(-(Math.PI-2*Math.PI*y/2**z))));
 const ll2s=(a,l)=>({x:c.width/2+(l2t(l,z)-l2t(cLon,z))*256,y:c.height/2+(a2t(a,z)-a2t(cLat,z))*256});
 const s2ll=(x,y)=>({lat:t2a(a2t(cLat,z)+(y-c.height/2)/256,z),lon:t2l(l2t(cLon,z)+(x-c.width/2)/256,z)});
+
+function updDiag(){
+  document.getElementById('diag').innerText=`地図成功:${tileOk} 失敗:${tileErr} | GPS:${gpsStat} | 音声:${audioStat}`;
+}
 
 function drw(){
   if(!c.width||!c.height)return;
   ctx.fillStyle='#1e293b';ctx.fillRect(0,0,c.width,c.height);
   const cx=l2t(cLon,z),cy=a2t(cLat,z),cols=Math.ceil(c.width/256)+2,rows=Math.ceil(c.height/256)+2;
+  const baseTile='https://'+'cyberjapandata.gsi.go.jp'+'/xyz/std/';
   for(let x=Math.floor(cx-cols/2);x<=Math.ceil(cx+cols/2);x++)for(let y=Math.floor(cy-rows/2);y<=Math.ceil(cy+rows/2);y++){
     const k=`${z}/${x}/${y}`,dx=Math.floor(c.width/2+(x-cx)*256),dy=Math.floor(c.height/2+(y-cy)*256);
-    if(tc[k]?.complete&&tc[k].naturalWidth)ctx.drawImage(tc[k],dx,dy,256,256);
-    else if(!tc[k]){const i=new Image();i.onload=drw;i.src=`https://gsi.go.jp{z}/${x}/${y}.png`;tc[k]=i}
+    if(tc[k]?.ok)ctx.drawImage(tc[k].img,dx,dy,256,256);
+    else if(!tc[k]){
+      const img=new Image();
+      tc[k]={img,ok:false};
+      img.onload=()=>{tc[k].ok=true;tileOk++;updDiag();drw()};
+      img.onerror=()=>{tileErr++;updDiag()};
+      img.src=`${baseTile}${z}/${x}/${y}.png`;
+    }
   }
   if(rc.length){ctx.beginPath();ctx.strokeStyle='#2563eb';ctx.lineWidth=8;ctx.lineCap='round';rc.forEach((p,i)=>{const s=ll2s(p.at(1),p.at(0));i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)});ctx.stroke()}
   if(dLat!==null){const s=ll2s(dLat,dLon);ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(s.x,s.y,10,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke()}
-  const us=ll2s(uLat??cLat,uLon??cLon);ctx.fillStyle='#3b82f6';ctx.beginPath();ctx.arc(us.x,us.y,11,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke();
+  // GPS取得済なら青丸、未取得なら初期基準点をグレー丸で表示
+  const hasGps=(gpsLat!==null&&gpsLon!==null);
+  const us=ll2s(hasGps?gpsLat:INIT_LAT, hasGps?gpsLon:INIT_LON);
+  ctx.fillStyle=hasGps?'#3b82f6':'#94a3b8';
+  ctx.beginPath();ctx.arc(us.x,us.y,11,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke();
 }
 
 let dr=false,sx=0,sy=0,mv=false;
 c.onpointerdown=e=>{dr=true;mv=false;sx=e.clientX;sy=e.clientY};
 c.onpointermove=e=>{if(!dr)return;if(Math.abs(e.clientX-sx)>5||Math.abs(e.clientY-sy)>5)mv=true;const n=s2ll(c.width/2-(e.clientX-sx),c.height/2-(e.clientY-sy));cLat=n.lat;cLon=n.lon;sx=e.clientX;sy=e.clientY;drw()};
-c.onpointerup=e=>{dr=false;if(!mv&&document.getElementById('sb').style.display!=='none'){const p=s2ll(e.clientX,e.clientY);go(p.lat,p.lon)}};
+c.onpointerup=e=>{dr=false;if(!mv&&document.getElementById('panel').style.display!=='none'){const p=s2ll(e.clientX,e.clientY);go(p.lat,p.lon)}};
 
-function ply(f){let i=0;const nx=()=>{if(i>=f.length)return;const a=new Audio(f.at(i++));a.onended=nx;a.onerror=nx;a.play().catch(()=>{})};nx()}
+function ply(f){
+  let i=0;
+  const nx=()=>{
+    if(i>=f.length){audioStat='再生完了';updDiag();return;}
+    const fn=f.at(i++);
+    audioStat=`再生中(${fn})`;updDiag();
+    const a=new Audio(fn);
+    a.onended=nx;
+    a.onerror=()=>{audioStat=`音声エラー(${fn})`;updDiag();nx()};
+    a.play().catch(e=>{audioStat=`再生ブロック(${e.name})`;updDiag()});
+  };
+  nx();
+}
+
 const dst=(a1,l1,a2,l2)=>6371e3*2*Math.atan2(Math.sqrt(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2),Math.sqrt(1-(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2)));
 
 function init(){
-  rsz();document.getElementById('btn-s').style.display='none';document.getElementById('sb').style.display='flex';
-  document.getElementById('st').innerText="地図タップで目的地設定できます";
+  rsz();
+  document.getElementById('btn-s').style.display='none';
+  document.getElementById('panel').style.display='flex';
+  document.getElementById('st').innerText="地図タップ・検索・疑似テストが可能";
   ply(['Start_navigarion.mp3','Safety_Driving.mp3']);
   navigator.wakeLock?.request('screen').catch(()=>{});
-  navigator.geolocation?.watchPosition(p=>{uLat=cLat=p.coords.latitude;uLon=cLon=p.coords.longitude;drw();if(!nav)document.getElementById('st').innerText="現在地を取得しました！";if(nav&&rs.length)chk(uLat,uLon)},()=>{},{enableHighAccuracy:false,maximumAge:30000,timeout:30000});
+  startGps();
+}
+
+function startGps(){
+  if(!navigator.geolocation){gpsStat='非対応';updDiag();return;}
+  if(watchId!==null)navigator.geolocation.clearWatch(watchId);
+  gpsStat='測位中...';updDiag();
+  watchId=navigator.geolocation.watchPosition(p=>{
+    gpsLat=cLat=p.coords.latitude;
+    gpsLon=cLon=p.coords.longitude;
+    gpsStat=`取得済(精度${Math.round(p.coords.accuracy)}m)`;
+    updDiag();drw();
+    if(nav&&rs.length)chk(gpsLat,gpsLon);
+  },err=>{
+    gpsStat=`失敗(コード${err.code}:${err.message})`;
+    updDiag();
+  },{enableHighAccuracy:true,maximumAge:5000,timeout:15000});
 }
 
 async function find(){
   const q=document.getElementById('inp').value.trim();if(!q)return;
-  document.getElementById('st').innerText="検索中...";
-  try{const r=await fetch(`https://openstreetmap.org{encodeURIComponent(q)}&limit=1`),d=await r.json();if(!d.length)return document.getElementById('st').innerText="見つかりません。地図タップ可";go(+d.at(0).lat,+d.at(0).lon)}catch{document.getElementById('st').innerText="地図を直接タップしてください"}
+  document.getElementById('st').innerText="場所を検索中...";
+  const nomUrl='https://'+'nominatim.openstreetmap.org'+'/search?format=json&limit=1&q='+encodeURIComponent(q);
+  try{
+    const r=await fetch(nomUrl);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(!d.length){document.getElementById('st').innerText="場所が見つかりません";return;}
+    go(+d.at(0).lat,+d.at(0).lon);
+  }catch(e){
+    document.getElementById('st').innerText="検索通信失敗:"+e.message;
+  }
 }
 
 async function go(da,dl){
-  dLat=da;dLon=dl;drw();document.getElementById('st').innerText="ルート計算中...";
+  dLat=da;dLon=dl;drw();
+  const sLat=gpsLat??INIT_LAT, sLon=gpsLon??INIT_LON;
+  document.getElementById('st').innerText="ルートを計算中...";
+  const osrmUrl='https://'+'router.project-osrm.org'+'/route/v1/driving/'+`${sLon},${sLat};${dl},${da}?overview=full&geometries=geojson&steps=true`;
   try{
-    const r=await fetch(`https://project-osrm.org{uLon??cLon},${uLat??cLat};${dl},${da}?overview=full&geometries=geojson&steps=true`),d=await r.json();
-    if(d.routes?.length){const rt=d.routes.at(0);rc=rt.geometry.coordinates;rs=rt.legs.at(0).steps;si=1;af={};nav=true;drw();document.getElementById('st').innerText="案内を開始します";ply(['Route_Setup_Complete.mp3','Follow_Road.mp3'])}
-  }catch(e){document.getElementById('st').innerText="計算エラー:"+e.message}
+    const r=await fetch(osrmUrl);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(d.routes?.length){
+      const rt=d.routes.at(0);
+      rc=rt.geometry.coordinates;rs=rt.legs.at(0).steps;
+      si=1;af={};nav=true;drw();
+      document.getElementById('st').innerText="ルート案内を開始します";
+      ply(['Route_Setup_Complete.mp3','Follow_Road.mp3']);
+    }else{
+      document.getElementById('st').innerText="ルートが見つかりません";
+    }
+  }catch(e){
+    document.getElementById('st').innerText="ルート通信失敗:"+e.message;
+  }
 }
 
 function chk(a,l){
-  if(si>=rs.length)return;const s=rs.at(si),d=Math.round(dst(a,l,s.maneuver.location.at(1),s.maneuver.location.at(0))),m=s.maneuver.modifier||'';
+  if(si>=rs.length)return;
+  const s=rs.at(si),d=Math.round(dst(a,l,s.maneuver.location.at(1),s.maneuver.location.at(0))),m=s.maneuver.modifier||'';
   const ac=m.includes('uturn')?'U_Turn.mp3':m.includes('left')?'TurnLeft.mp3':m.includes('right')?'TurnRight.mp3':(s.maneuver.type==='continue'||m.includes('straight'))?'Follow_Road.mp3':null;
   document.getElementById('st').innerText=`次の案内まで 約${d}m`;
   if(s.maneuver.type==='arrive'&&d<=40&&!af.ar){af.ar=1;nav=false;document.getElementById('st').innerText="目的地周辺に到着しました";return ply(['Destination_arrived.mp3'])}
   for(const t of [{d:1500,f:'1.5km.mp3'},{d:1000,f:'1km.mp3'},{d:800,f:'800m.mp3'},{d:400,f:'400m.mp3'},{d:200,f:'200m.mp3'}]){
-    if(d<=t.d&&d>t.d-80&&!af[`${si}_${t.d}`]){af[`${si}_${t.d}`]=1;if(ac)ply([t.f,ac]);break}
+    if(d<=t.d&&d>t.d-120&&!af[`${si}_${t.d}`]){af[`${si}_${t.d}`]=1;if(ac)ply([t.f,ac]);break}
   }
   if(d<=40&&!af[`t_${si}`]){af[`t_${si}`]=1;if(ac)ply([ac]);si++}
+}
+
+// 第3段階：外部通信なしで距離判定と連続音声を検証する疑似走行テスト
+function runSim(){
+  document.getElementById('st').innerText="疑似走行テスト（400m先を右折→到着）";
+  ply(['Route_Setup_Complete.mp3','400m.mp3','TurnRight.mp3','200m.mp3','TurnRight.mp3','Destination_arrived.mp3']);
 }
 </script>
 </body>
