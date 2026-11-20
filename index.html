@@ -82,18 +82,9 @@
     }
 
     if (navigator.geolocation) {
-      // まず屋内でも素早く現在地を取得
-      navigator.geolocation.getCurrentPosition(pos => {
-        updatePosition(pos);
-        // 取得できたら高精度な連続追跡を開始
-        navigator.geolocation.watchPosition(updatePosition, () => {}, {
-          enableHighAccuracy: true, maximumAge: 3000, timeout: 30000
-        });
-      }, err => {
-        document.getElementById('status').innerText = "測位エラー(" + err.code + "): 窓際でお試しください";
-      }, { enableHighAccuracy: false, maximumAge: 10000, timeout: 20000 });
-    } else {
-      document.getElementById('status').innerText = "GPS非対応の画面です";
+      navigator.geolocation.watchPosition(updatePosition, err => {
+        document.getElementById('status').innerText = "GPS待機中（目的地検索は可能です）";
+      }, { enableHighAccuracy: false, maximumAge: 15000, timeout: 30000 });
     }
   }
 
@@ -117,25 +108,29 @@
   }
 
   async function searchRoute() {
-    const query = document.getElementById('dest-input').value;
+    const query = document.getElementById('dest-input').value.trim();
     if (!query) return alert("目的地を入力してください");
     if (!currentPos) {
-      // 測位前でもテストできるよう仮座標（長崎駅周辺）をセット
       currentPos = [32.7525, 129.8705];
     }
 
-    document.getElementById('status').innerText = "ルート検索中...";
+    document.getElementById('status').innerText = "目的地を検索中...";
     try {
-      const geoRes = await fetch(`https://openstreetmap.org{encodeURIComponent(query)}&limit=1`);
+      const geoRes = await fetch(`https://gsi.go.jp{encodeURIComponent(query)}`);
       const geoData = await geoRes.json();
-      if (!geoData.length) {
+      if (!geoData || geoData.length === 0) {
         document.getElementById('status').innerText = "目的地が見つかりませんでした";
         return;
       }
-      const destLat = geoData[0].lat;
-      const destLon = geoData[0].lon;
+      const firstHit = geoData[0];
+      const destLon = firstHit.geometry.coordinates[0];
+      const destLat = firstHit.geometry.coordinates[1];
 
-      const routeRes = await fetch(`https://project-osrm.org{currentPos[1]},${currentPos[0]};${destLon},${destLat}?overview=full&geometries=geojson&steps=true`);
+      document.getElementById('status').innerText = "ルートを計算中...";
+      const startLon = currentPos[1];
+      const startLat = currentPos[0];
+
+      const routeRes = await fetch(`https://project-osrm.org{startLon},${startLat};${destLon},${destLat}?overview=full&geometries=geojson&steps=true`);
       const routeData = await routeRes.json();
 
       if (routeData.routes && routeData.routes.length > 0) {
@@ -151,9 +146,11 @@
 
         document.getElementById('status').innerText = "案内を開始します";
         playAudioQueue(['Route_Setup_Complete.mp3', 'Follow_Road.mp3']);
+      } else {
+        document.getElementById('status').innerText = "ルートが見つかりませんでした";
       }
     } catch (e) {
-      document.getElementById('status').innerText = "通信エラーが発生しました";
+      document.getElementById('status').innerText = "検索エラー: " + e.message;
     }
   }
 
