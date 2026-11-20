@@ -32,7 +32,8 @@
 <script src="https://unpkg.com"></script>
 <script>
   let map, userMarker, destMarker, routeLine;
-  let currentPos = null;
+  let currentLat = null;
+  let currentLon = null;
   let routeSteps = [];
   let currentStepIndex = 0;
   let announcedFlags = {};
@@ -43,8 +44,9 @@
     let index = 0;
     function next() {
       if (index >= files.length) return;
-      const audio = new Audio(files[index]);
+      const file = files.at(index);
       index++;
+      const audio = new Audio(file);
       audio.onended = next;
       audio.onerror = () => next();
       audio.play().catch(() => {});
@@ -69,12 +71,9 @@
     }).addTo(map);
     setTimeout(() => { map.invalidateSize(); }, 500);
 
-    // 地図をタップした場所を直接目的地にしてルート検索する機能
     map.on('click', function(e) {
       if (document.getElementById('search-box').style.display === 'none') return;
-      const lat = e.latlng.lat;
-      const lon = e.latlng.lng;
-      calcRouteToCoords(lat, lon);
+      calcRouteToCoords(e.latlng.lat, e.latlng.lng);
     });
   };
 
@@ -97,21 +96,21 @@
   }
 
   function updatePosition(pos) {
-    const lat = pos.coords.latitude;
-    const lng = pos.coords.longitude;
-    currentPos = [lat, lng];
+    currentLat = pos.coords.latitude;
+    currentLon = pos.coords.longitude;
+    const latLng = L.latLng(currentLat, currentLon);
 
     if (!userMarker) {
-      userMarker = L.circleMarker(currentPos, { radius: 9, color: '#fff', fillColor: '#2563eb', fillOpacity: 1, weight: 3 }).addTo(map);
-      map.setView(currentPos, 17);
+      userMarker = L.circleMarker(latLng, { radius: 9, color: '#fff', fillColor: '#2563eb', fillOpacity: 1, weight: 3 }).addTo(map);
+      map.setView(latLng, 17);
       if (!isNavigating) document.getElementById('status').innerText = "現在地を取得しました！";
     } else {
-      userMarker.setLatLng(currentPos);
-      map.panTo(currentPos);
+      userMarker.setLatLng(latLng);
+      map.panTo(latLng);
     }
 
     if (isNavigating && routeSteps.length > 0) {
-      checkNavigation(lat, lng);
+      checkNavigation(currentLat, currentLon);
     }
   }
 
@@ -128,37 +127,33 @@
         document.getElementById('status').innerText = "見つかりません。地図を直接タップしてください";
         return;
       }
-      const destLat = parseFloat(data.lat);
-      const destLon = parseFloat(data.lon);
-      calcRouteToCoords(destLat, destLon);
+      const first = data.at(0);
+      calcRouteToCoords(parseFloat(first.lat), parseFloat(first.lon));
     } catch (e) {
       document.getElementById('status').innerText = "検索通信制限：地図上の目的地を直接タップしてください";
     }
   }
 
   async function calcRouteToCoords(destLat, destLon) {
-    if (!currentPos) {
-      currentPos = [32.7525, 129.8705]; // 未測位時の仮スタート（長崎駅）
-    }
+    const startLat = currentLat !== null ? currentLat : 32.7525;
+    const startLon = currentLon !== null ? currentLon : 129.8705;
 
     if (destMarker) map.removeLayer(destMarker);
     destMarker = L.marker([destLat, destLon]).addTo(map);
 
     document.getElementById('status').innerText = "ルートを計算中...";
     try {
-      const startLon = currentPos;
-      const startLat = currentPos;
       const routeUrl = `https://project-osrm.org{startLon},${startLat};${destLon},${destLat}?overview=full&geometries=geojson&steps=true`;
       const routeRes = await fetch(routeUrl);
       const routeData = await routeRes.json();
 
       if (routeData.routes && routeData.routes.length > 0) {
-        const route = routeData.routes;
+        const route = routeData.routes.at(0);
         if (routeLine) map.removeLayer(routeLine);
         routeLine = L.geoJSON(route.geometry, { style: { color: '#3b82f6', weight: 7 } }).addTo(map);
-        map.fitBounds(routeLine.getBounds(), { padding: });
+        map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
 
-        routeSteps = route.legs.steps;
+        routeSteps = route.legs.at(0).steps;
         currentStepIndex = 1;
         announcedFlags = {};
         isNavigating = true;
@@ -176,16 +171,16 @@
   function checkNavigation(lat, lng) {
     if (currentStepIndex >= routeSteps.length) return;
 
-    const step = routeSteps[currentStepIndex];
-    const targetLon = step.maneuver.location;
-    const targetLat = step.maneuver.location;
+    const step = routeSteps.at(currentStepIndex);
+    const targetLon = step.maneuver.location.at(0);
+    const targetLat = step.maneuver.location.at(1);
     const dist = Math.round(getDistance(lat, lng, targetLat, targetLon));
 
     const actionFile = getActionAudio(step.maneuver);
     document.getElementById('status').innerText = `次の案内まで 約${dist}m`;
 
-    if (step.maneuver.type === 'arrive' && dist <= 40 && !announcedFlags['arrive']) {
-      announcedFlags['arrive'] = true;
+    if (step.maneuver.type === 'arrive' && dist <= 40 && !announcedFlags.arrive) {
+      announcedFlags.arrive = true;
       isNavigating = false;
       document.getElementById('status').innerText = "目的地周辺に到着しました";
       playAudioQueue(['Destination_arrived.mp3']);
@@ -201,7 +196,7 @@
     ];
 
     for (let t of thresholds) {
-      const key = `${currentStepIndex}_${t.d}`;
+      const key = `step_${currentStepIndex}_${t.d}`;
       if (dist <= t.d && dist > t.d - 80 && !announcedFlags[key]) {
         announcedFlags[key] = true;
         if (actionFile) playAudioQueue([t.file, actionFile]);
@@ -209,7 +204,7 @@
       }
     }
 
-    const turnKey = `${currentStepIndex}_turn`;
+    const turnKey = `turn_${currentStepIndex}`;
     if (dist <= 40 && !announcedFlags[turnKey]) {
       announcedFlags[turnKey] = true;
       if (actionFile) playAudioQueue([actionFile]);
