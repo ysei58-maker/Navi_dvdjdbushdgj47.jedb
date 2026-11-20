@@ -14,7 +14,12 @@ body,html{width:100%;height:100%;font-family:sans-serif;background:#111;color:#f
 .sp-warn{font-size:9.5px;color:#fff;line-height:1.3;text-shadow:0 1px 2px rgba(0,0,0,.6)}
 #btn-s{background:linear-gradient(135deg,#f59e0b,#d97706);border:2px solid #fff;width:100%;font-size:14px;padding:6px;border-radius:8px;letter-spacing:1px;box-shadow:0 3px 8px rgba(0,0,0,.4)}
 #ui{position:fixed;top:max(12px,env(safe-area-inset-top));left:10px;right:10px;z-index:10;background:rgba(0,0,0,.9);padding:12px;border-radius:12px;display:none;flex-direction:column;gap:8px;border:1px solid #333}
-#st{font-size:14px;font-weight:bold;color:#4ade80;text-align:center}
+#st{font-size:13px;font-weight:bold;color:#4ade80;text-align:center}
+#tbox{display:none;align-items:center;gap:12px;background:linear-gradient(135deg,#1e3a8a,#1d4ed8);border:2px solid #60a5fa;padding:8px 14px;border-radius:10px}
+#tico{font-size:38px;font-weight:bold;line-height:1;min-width:44px;text-align:center}
+#tinfo{display:flex;flex-direction:column}
+#tdist{font-size:24px;font-weight:bold;color:#fff;line-height:1.1}
+#ttxt{font-size:13px;color:#dbeafe;font-weight:bold}
 .row{display:flex;gap:6px}
 input{flex:1;min-width:0;padding:9px;border-radius:8px;border:none;font-size:15px;color:#000;background:#fff}
 button{padding:9px 10px;border-radius:8px;border:none;font-weight:bold;font-size:12px;background:#2563eb;color:#fff;white-space:nowrap}
@@ -54,6 +59,10 @@ button{padding:9px 10px;border-radius:8px;border:none;font-weight:bold;font-size
 </div>
 
 <div id="ui">
+  <div id="tbox">
+    <div id="tico">↑</div>
+    <div id="tinfo"><div id="tdist">--m</div><div id="ttxt">案内準備中</div></div>
+  </div>
   <div id="st">目的地を検索するか地図をタップしてください</div>
   <div class="row"><input id="inp" placeholder="目的地（例：アミュプラザ）"><button onclick="find()">検索</button></div>
   <div id="res"></div>
@@ -89,6 +98,8 @@ const l2t=(l,z)=>(l+180)/360*2**z, a2t=(a,z)=>(1-Math.log(Math.tan(a*Math.PI/180
 const t2l=(x,z)=>x/2**z*360-180, t2a=(y,z)=>180/Math.PI*Math.atan(.5*(Math.exp(Math.PI-2*Math.PI*y/2**z)-Math.exp(-(Math.PI-2*Math.PI*y/2**z))));
 const ll2s=(a,l)=>({x:c.width/2+(l2t(l,z)-l2t(cLon,z))*256,y:c.height/2+(a2t(a,z)-a2t(cLat,z))*256});
 const s2ll=(x,y)=>{const dx=x-c.width/2,dy=y-c.height/2,ang=(hUp&&flw)?hdg*Math.PI/180:0,rx=dx*Math.cos(ang)-dy*Math.sin(ang),ry=dx*Math.sin(ang)+dy*Math.cos(ang);return{lat:t2a(a2t(cLat,z)+ry/256,z),lon:t2l(l2t(cLon,z)+rx/256,z)}};
+let tTimer=null,hideStep=-1;
+
 function drw(){
   if(!c.width||!c.height)return;
   ctx.fillStyle='#0f172a';ctx.fillRect(0,0,c.width,c.height);
@@ -108,7 +119,6 @@ function drw(){
   if(rc.length){ctx.lineCap='round';ctx.lineJoin='round';[['#fff',12],['#2563eb',8]].forEach(([col,w])=>{ctx.beginPath();ctx.strokeStyle=col;ctx.lineWidth=w;rc.forEach((p,i)=>{const s=ll2s(p.at(1),p.at(0));i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)});ctx.stroke()})}
   if(dLat!==null){const s=ll2s(dLat,dLon);ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(s.x,s.y,10,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke()}
 
-  // 自車位置（進行方向を示す矢印型マーカー）
   const hg=(gLat!==null&&gLon!==null),us=ll2s(hg?gLat:I_LAT,hg?gLon:I_LON);
   ctx.save();
   ctx.translate(us.x,us.y);
@@ -145,7 +155,6 @@ function nxtA(){if(!aq.length){isP=false;return}isP=true;const fn=aq.shift();cur
 const dst=(a1,l1,a2,l2)=>6371e3*2*Math.atan2(Math.sqrt(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2),Math.sqrt(1-(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2)));
 const brg=(a1,l1,a2,l2)=>{const y=Math.sin((l2-l1)*Math.PI/180)*Math.cos(a2*Math.PI/180),x=Math.cos(a1*Math.PI/180)*Math.sin(a2*Math.PI/180)-Math.sin(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.cos((l2-l1)*Math.PI/180);return(Math.atan2(y,x)*180/Math.PI+360)%360};
 
-// 現在地からルート線までの最短距離（m）を計算（リルート判定用）
 function offRouteDist(lat,lon){
   if(rc.length<2)return 0;
   let minD=999999;
@@ -186,10 +195,11 @@ function gps(){
     if(nav&&rs.length)chk(gLat,gLon);
   },()=>{},{enableHighAccuracy:true,maximumAge:3000,timeout:15000});
 }
-
 function cnl(){
   stpA();
+  clearTimeout(tTimer);tTimer=null;hideStep=-1;
   nav=false;dLat=null;dLon=null;rc=[];rs=[];si=0;af={};
+  document.getElementById('tbox').style.display='none';
   document.getElementById('res').style.display='none';
   rec();
   document.getElementById('st').innerText="ルート案内を中止しました";
@@ -219,8 +229,19 @@ async function find(){
   }catch(e){document.getElementById('st').innerText="検索失敗:"+e.message}
 }
 
+function turnInfo(mObj){
+  const m=mObj.modifier||'',tp=mObj.type||'';
+  if(tp==='arrive')return{ico:'🏁',txt:'目的地周辺',mp3:'Destination_arrived.mp3'};
+  if(m.includes('uturn'))return{ico:'↶',txt:'Uターン',mp3:'U_Turn.mp3'};
+  if(m.includes('left'))return{ico:'↰',txt:'左折',mp3:'TurnLeft.mp3'};
+  if(m.includes('right'))return{ico:'↱',txt:'右折',mp3:'TurnRight.mp3'};
+  if(tp==='continue'||m.includes('straight'))return{ico:'↑',txt:'道なり',mp3:'Follow_Road.mp3'};
+  return null;
+}
+
 async function go(da,dl,isReroute){
   stpA();
+  clearTimeout(tTimer);tTimer=null;hideStep=-1;
   dLat=da;dLon=dl;rec();
   const sA=gLat??I_LAT,sL=gLon??I_LON;
   document.getElementById('st').innerText=isReroute?"ルートを外れました。再検索中...":"ルート計算中...";
@@ -231,31 +252,94 @@ async function go(da,dl,isReroute){
     if(!r.ok)throw new Error('HTTP '+r.status);
     const d=await r.json();
     if(d.routes?.length){
-      const rt=d.routes.at(0);rc=rt.geometry.coordinates;rs=rt.legs.at(0).steps;si=1;af={};nav=true;drw();
+      const rt=d.routes.at(0);rc=rt.geometry.coordinates;
+      rs=rt.legs.at(0).steps.slice(1).filter(s=>turnInfo(s.maneuver)!==null);
+      si=0;af={};nav=true;drw();
       document.getElementById('st').innerText=isReroute?"新しいルートで案内します":"ルート案内を開始します";
+      const d1=rs.length>0?dst(sA,sL,rs.at(0).maneuver.location.at(1),rs.at(0).maneuver.location.at(0)):999;
       if(!isReroute){
-        const d1=rs.length>1?dst(sA,sL,rs.at(1).maneuver.location.at(1),rs.at(1).maneuver.location.at(0)):999;
         ply(d1<=250?['Route_Setup_Complete.mp3']:['Route_Setup_Complete.mp3','Follow_Road.mp3']);
       }
-      chk(sA,sL);
+      if(d1>250&&rs.length>0&&turnInfo(rs.at(0).maneuver).mp3!=='Follow_Road.mp3'){
+        document.getElementById('tico').innerText='↑';
+        document.getElementById('tdist').innerText='道なり';
+        document.getElementById('ttxt').innerText='しばらく直進';
+        document.getElementById('tbox').style.display='flex';
+        tTimer=setTimeout(()=>{tTimer=null;if(nav)chk(gLat??I_LAT,gLon??I_LON)},5000);
+      }else{
+        chk(sA,sL);
+      }
     }else document.getElementById('st').innerText="ルートなし";
   }catch(e){document.getElementById('st').innerText="ルート失敗:"+e.message}
 }
 
 function chk(a,l){
-  if(si>=rs.length)return;
-  // ルートから65m以上外れたら自動リルート（12秒間隔制限）
+  if(si>=rs.length){document.getElementById('tbox').style.display='none';return}
   if(dLat!==null&&offRouteDist(a,l)>65&&Date.now()-lastRr>12000){
     lastRr=Date.now();
     return go(dLat,dLon,true);
   }
-  const s=rs.at(si),d=Math.round(dst(a,l,s.maneuver.location.at(1),s.maneuver.location.at(0))),m=s.maneuver.modifier||'',ac=m.includes('uturn')?'U_Turn.mp3':m.includes('left')?'TurnLeft.mp3':m.includes('right')?'TurnRight.mp3':(s.maneuver.type==='continue'||m.includes('straight'))?'Follow_Road.mp3':null;
-  document.getElementById('st').innerText=`次の案内まで 約${d}m`;
-  if(s.maneuver.type==='arrive'&&d<=40&&!af.ar){af.ar=1;nav=false;document.getElementById('st').innerText="目的地周辺に到着しました";return ply(['Destination_arrived.mp3'])}
-  for(const t of [{d:1500,f:'1.5km.mp3'},{d:1000,f:'1km.mp3'},{d:800,f:'800m.mp3'},{d:400,f:'400m.mp3'},{d:200,f:'200m.mp3'}])if(d<=t.d&&d>t.d-120&&!af[`${si}_${t.d}`]){af[`${si}_${t.d}`]=1;if(ac)ply([t.f,ac]);break}
-  if(d<=40&&!af[`t_${si}`]){af[`t_${si}`]=1;if(ac)ply([ac]);si++}
+  const s=rs.at(si),d=Math.round(dst(a,l,s.maneuver.location.at(1),s.maneuver.location.at(0)));
+  const inf=turnInfo(s.maneuver);
+  const dTxt=d>=1000?`${(d/1000).toFixed(1)}km`:`${d}m`;
+  const tb=document.getElementById('tbox');
+
+  if(inf.mp3==='Follow_Road.mp3'){
+    if(hideStep!==si){
+      document.getElementById('tico').innerText=inf.ico;
+      document.getElementById('tdist').innerText=dTxt;
+      document.getElementById('ttxt').innerText=inf.txt;
+      tb.style.display='flex';
+      if(tTimer===null){
+        const curIdx=si;
+        tTimer=setTimeout(()=>{hideStep=curIdx;tTimer=null;tb.style.display='none'},5000);
+      }
+    }else{
+      tb.style.display='none';
+    }
+  }else{
+    clearTimeout(tTimer);tTimer=null;
+    document.getElementById('tico').innerText=inf.ico;
+    document.getElementById('tdist').innerText=dTxt;
+    document.getElementById('ttxt').innerText=inf.txt;
+    tb.style.display='flex';
+  }
+  document.getElementById('st').innerText=`目的地までルート案内中`;
+
+  if(s.maneuver.type==='arrive'&&d<=40&&!af.ar){
+    clearTimeout(tTimer);tTimer=null;af.ar=1;nav=false;
+    tb.style.display='none';
+    document.getElementById('st').innerText="目的地周辺に到着しました";
+    return ply(['Destination_arrived.mp3']);
+  }
+  for(const t of [{d:1500,f:'1.5km.mp3'},{d:1000,f:'1km.mp3'},{d:800,f:'800m.mp3'},{d:400,f:'400m.mp3'},{d:200,f:'200m.mp3'}]){
+    if(d<=t.d&&d>t.d-120&&!af[`${si}_${t.d}`]){af[`${si}_${t.d}`]=1;ply([t.f,inf.mp3]);break}
+  }
+  if(d<=40&&!af[`t_${si}`]){
+    af[`t_${si}`]=1;
+    clearTimeout(tTimer);tTimer=null;hideStep=-1;
+    ply([inf.mp3]);
+    si++;
+    if(si<rs.length)chk(a,l);
+    else tb.style.display='none';
+  }
 }
-function sim(){stpA();document.getElementById('st').innerText="疑似走行テスト中";ply(['Route_Setup_Complete.mp3','400m.mp3','TurnRight.mp3','200m.mp3','TurnRight.mp3','Destination_arrived.mp3'])}
+
+function sim(){
+  stpA();clearTimeout(tTimer);tTimer=null;
+  const tb=document.getElementById('tbox');
+  document.getElementById('tico').innerText='↑';
+  document.getElementById('tdist').innerText='道なり';
+  document.getElementById('ttxt').innerText='5秒後に消去テスト';
+  tb.style.display='flex';
+  document.getElementById('st').innerText="疑似走行テスト中";
+  ply(['Route_Setup_Complete.mp3','Follow_Road.mp3','400m.mp3','TurnRight.mp3','200m.mp3','TurnRight.mp3','Destination_arrived.mp3']);
+  tTimer=setTimeout(()=>{
+    document.getElementById('tico').innerText='↱';
+    document.getElementById('tdist').innerText='200m';
+    document.getElementById('ttxt').innerText='右折（動作完了まで表示）';
+  },5000);
+}
 </script>
 </body>
 </html>
