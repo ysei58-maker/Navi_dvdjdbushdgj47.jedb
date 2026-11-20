@@ -22,7 +22,7 @@
   <div id="status">「ナビ起動」を押してください</div>
   <button id="btn-start" onclick="initNavi()">① ナビ起動（音声ロック解除）</button>
   <div class="controls" id="search-box" style="display:none;">
-    <input type="text" id="dest-input" placeholder="目的地を入力（例：長崎駅）">
+    <input type="text" id="dest-input" placeholder="目的地（例：長崎駅、稲佐山など）">
     <button onclick="searchRoute()">ルート検索</button>
   </div>
 </div>
@@ -63,7 +63,7 @@
   }
 
   window.onload = function() {
-    map = L.map('map', { zoomControl: false }).setView([32.7503, 129.8777], 16);
+    map = L.map('map', { zoomControl: false }).setView([32.7525, 129.8705], 16);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap'
     }).addTo(map);
@@ -107,39 +107,48 @@
     }
   }
 
+  // SafariからCORS制限なしで通信できるジオコーディング（Photon API）
+  async function getCoordinates(query) {
+    const url = `https://komoot.io{encodeURIComponent(query)}&limit=1`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data && data.features && data.features.length > 0) {
+      const coords = data.features.geometry.coordinates;
+      return { lon: coords, lat: coords };
+    }
+    return null;
+  }
+
   async function searchRoute() {
     const query = document.getElementById('dest-input').value.trim();
     if (!query) return alert("目的地を入力してください");
     if (!currentPos) {
-      currentPos = [32.7525, 129.8705];
+      currentPos = [32.7525, 129.8705]; // 未測位時の仮スタート（長崎駅）
     }
 
     document.getElementById('status').innerText = "目的地を検索中...";
     try {
-      const geoRes = await fetch(`https://gsi.go.jp{encodeURIComponent(query)}`);
-      const geoData = await geoRes.json();
-      if (!geoData || geoData.length === 0) {
+      const dest = await getCoordinates(query);
+      if (!dest) {
         document.getElementById('status').innerText = "目的地が見つかりませんでした";
         return;
       }
-      const firstHit = geoData[0];
-      const destLon = firstHit.geometry.coordinates[0];
-      const destLat = firstHit.geometry.coordinates[1];
 
       document.getElementById('status').innerText = "ルートを計算中...";
-      const startLon = currentPos[1];
-      const startLat = currentPos[0];
+      const startLon = currentPos;
+      const startLat = currentPos;
 
-      const routeRes = await fetch(`https://project-osrm.org{startLon},${startLat};${destLon},${destLat}?overview=full&geometries=geojson&steps=true`);
+      const routeUrl = `https://project-osrm.org{startLon},${startLat};${dest.lon},${dest.lat}?overview=full&geometries=geojson&steps=true`;
+      const routeRes = await fetch(routeUrl);
       const routeData = await routeRes.json();
 
       if (routeData.routes && routeData.routes.length > 0) {
-        const route = routeData.routes[0];
+        const route = routeData.routes;
         if (routeLine) map.removeLayer(routeLine);
         routeLine = L.geoJSON(route.geometry, { style: { color: '#3b82f6', weight: 7 } }).addTo(map);
-        map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
+        map.fitBounds(routeLine.getBounds(), { padding: });
 
-        routeSteps = route.legs[0].steps;
+        routeSteps = route.legs.steps;
         currentStepIndex = 1;
         announcedFlags = {};
         isNavigating = true;
@@ -150,7 +159,7 @@
         document.getElementById('status').innerText = "ルートが見つかりませんでした";
       }
     } catch (e) {
-      document.getElementById('status').innerText = "検索エラー: " + e.message;
+      document.getElementById('status').innerText = "通信エラー: " + e.message;
     }
   }
 
@@ -158,8 +167,8 @@
     if (currentStepIndex >= routeSteps.length) return;
 
     const step = routeSteps[currentStepIndex];
-    const targetLon = step.maneuver.location[0];
-    const targetLat = step.maneuver.location[1];
+    const targetLon = step.maneuver.location;
+    const targetLat = step.maneuver.location;
     const dist = Math.round(getDistance(lat, lng, targetLat, targetLon));
 
     const actionFile = getActionAudio(step.maneuver);
