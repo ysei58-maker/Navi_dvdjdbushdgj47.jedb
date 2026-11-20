@@ -307,8 +307,10 @@ function chk(a,l){
   document.getElementById('st').innerText=`目的地までルート案内中`;
 
   if(s.maneuver.type==='arrive'&&d<=40&&!af.ar){
-    clearTimeout(tTimer);tTimer=null;af.ar=1;nav=false;
+    clearTimeout(tTimer);tTimer=null;af.ar=1;
+    nav=false;dLat=null;dLon=null;rc=[];rs=[];si=0;
     tb.style.display='none';
+    drw();
     document.getElementById('st').innerText="目的地周辺に到着しました";
     return ply(['Destination_arrived.mp3']);
   }
@@ -321,7 +323,7 @@ function chk(a,l){
     ply([inf.mp3]);
     si++;
     if(si<rs.length)chk(a,l);
-    else tb.style.display='none';
+    else{nav=false;dLat=null;dLon=null;rc=[];rs=[];si=0;tb.style.display='none';drw()}
   }
 }
 
