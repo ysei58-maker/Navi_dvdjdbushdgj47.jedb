@@ -15,7 +15,6 @@ body,html{width:100%;height:100%;font-family:sans-serif;background:#111;color:#f
 #btn-s{background:linear-gradient(135deg,#f59e0b,#d97706);border:2px solid #fff;width:100%;font-size:14px;padding:6px;border-radius:8px;letter-spacing:1px;box-shadow:0 3px 8px rgba(0,0,0,.4)}
 #ui{position:fixed;top:max(12px,env(safe-area-inset-top));left:10px;right:10px;z-index:10;background:rgba(0,0,0,.9);padding:12px;border-radius:12px;display:none;flex-direction:column;gap:8px;border:1px solid #333}
 #st{font-size:14px;font-weight:bold;color:#4ade80;text-align:center}
-#dg{display:none}
 .row{display:flex;gap:6px}
 input{flex:1;min-width:0;padding:9px;border-radius:8px;border:none;font-size:15px;color:#000;background:#fff}
 button{padding:9px 10px;border-radius:8px;border:none;font-weight:bold;font-size:12px;background:#2563eb;color:#fff;white-space:nowrap}
@@ -26,7 +25,7 @@ button{padding:9px 10px;border-radius:8px;border:none;font-weight:bold;font-size
 .item b{color:#38bdf8;font-size:13px}
 #zb{position:fixed;bottom:max(24px,env(safe-area-inset-bottom));right:max(15px,env(safe-area-inset-right));z-index:10;display:none;flex-direction:column;gap:8px;align-items:center}
 .z{width:46px;height:46px;font-size:20px;border-radius:50%;background:rgba(0,0,0,.85);border:1px solid #666;display:flex;align-items:center;justify-content:center}
-#btn-m{font-size:12px;background:#0f172a;border:1px solid #38bdf8;color:#38bdf8}
+#btn-m,#btn-h{font-size:11px;background:#0f172a;border:1px solid #38bdf8;color:#38bdf8}
 #btn-g{font-size:18px;background:#2563eb;border:2px solid #fff;color:#fff}
 @media(orientation:landscape){
   #splash{background-image:url('opening_wide.jpg'),url('opening.jpg')}
@@ -37,7 +36,7 @@ button{padding:9px 10px;border-radius:8px;border:none;font-weight:bold;font-size
   #res{max-height:130px}
   #zb{bottom:12px;gap:6px}
   .z{width:40px;height:40px;font-size:18px}
-  #btn-m{font-size:11px}
+  #btn-m,#btn-h{font-size:10px}
 }
 </style>
 </head>
@@ -56,7 +55,6 @@ button{padding:9px 10px;border-radius:8px;border:none;font-weight:bold;font-size
 
 <div id="ui">
   <div id="st">目的地を検索するか地図をタップしてください</div>
-  <div id="dg"></div>
   <div class="row"><input id="inp" placeholder="目的地（例：アミュプラザ）"><button onclick="find()">検索</button></div>
   <div id="res"></div>
   <div class="row">
@@ -68,94 +66,125 @@ button{padding:9px 10px;border-radius:8px;border:none;font-weight:bold;font-size
 <canvas id="c"></canvas>
 <div id="zb">
   <button class="z" id="btn-g" onclick="rec()">◎</button>
+  <button class="z" id="btn-h" onclick="tglH()">進行</button>
   <button class="z" id="btn-m" onclick="tgl()">標準</button>
-  <button class="z" id="btn-p" onclick="zm(1)">＋</button>
-  <button class="z" id="btn-n" onclick="zm(-1)">－</button>
+  <button class="z" onclick="zm(1)">＋</button>
+  <button class="z" onclick="zm(-1)">－</button>
 </div>
 <script>
 document.addEventListener('dblclick',e=>e.preventDefault(),{passive:false});
 const c=document.getElementById('c'),ctx=c.getContext('2d'),I_LAT=32.7525,I_LON=129.8705;
-let tc={},cLat=I_LAT,cLon=I_LON,z=16,md='photo',gLat=null,gLon=null,wid=null,dLat=null,dLon=null,rc=[],rs=[],si=0,af={},nav=false,flw=true,tOk=0,tEr=0,gSt='未開始',aSt='待機';
+let tc={},cLat=I_LAT,cLon=I_LON,z=16,md='photo',gLat=null,gLon=null,pLat=null,pLon=null,hdg=0,hUp=true,wid=null,dLat=null,dLon=null,rc=[],rs=[],si=0,af={},nav=false,flw=true,lastRr=0;
 let aq=[],curA=null,isP=false,opDone=false;
 function playOp(){if(opDone)return;const a=new Audio('Opening.mp3');a.play().then(()=>{opDone=true}).catch(()=>{})}
 window.addEventListener('load',()=>{rsz();playOp()});
 const rsz=()=>{c.width=document.documentElement.clientWidth||innerWidth||390;c.height=document.documentElement.clientHeight||innerHeight||844;drw()};
 addEventListener('resize',rsz);addEventListener('orientationchange',()=>setTimeout(rsz,200));setTimeout(rsz,100);
 const zm=d=>{z=Math.max(5,Math.min(18,z+d));drw()};
-const tgl=()=>{md=(md==='photo')?'std':'photo';document.getElementById('btn-m').innerText=(md==='photo')?'標準':'航空';tc={};tOk=0;tEr=0;udg();drw()};
+const tgl=()=>{md=(md==='photo')?'std':'photo';document.getElementById('btn-m').innerText=(md==='photo')?'標準':'航空';tc={};drw()};
+const tglH=()=>{hUp=!hUp;const b=document.getElementById('btn-h');b.innerText=hUp?'進行':'北上';b.style.borderColor=hUp?'#38bdf8':'#666';b.style.color=hUp?'#38bdf8':'#fff';drw()};
 const updFlw=()=>{const b=document.getElementById('btn-g');b.style.background=flw?'#2563eb':'rgba(0,0,0,.85)';b.style.borderColor=flw?'#fff':'#666'};
 const rec=()=>{flw=true;updFlw();if(gLat!==null&&gLon!==null){cLat=gLat;cLon=gLon}else{cLat=I_LAT;cLon=I_LON}drw()};
 const l2t=(l,z)=>(l+180)/360*2**z, a2t=(a,z)=>(1-Math.log(Math.tan(a*Math.PI/180)+1/Math.cos(a*Math.PI/180))/Math.PI)/2*2**z;
 const t2l=(x,z)=>x/2**z*360-180, t2a=(y,z)=>180/Math.PI*Math.atan(.5*(Math.exp(Math.PI-2*Math.PI*y/2**z)-Math.exp(-(Math.PI-2*Math.PI*y/2**z))));
 const ll2s=(a,l)=>({x:c.width/2+(l2t(l,z)-l2t(cLon,z))*256,y:c.height/2+(a2t(a,z)-a2t(cLat,z))*256});
-const s2ll=(x,y)=>({lat:t2a(a2t(cLat,z)+(y-c.height/2)/256,z),lon:t2l(l2t(cLon,z)+(x-c.width/2)/256,z)});
-const udg=()=>{};
-  function drw(){
+const s2ll=(x,y)=>{const dx=x-c.width/2,dy=y-c.height/2,ang=(hUp&&flw)?hdg*Math.PI/180:0,rx=dx*Math.cos(ang)-dy*Math.sin(ang),ry=dx*Math.sin(ang)+dy*Math.cos(ang);return{lat:t2a(a2t(cLat,z)+ry/256,z),lon:t2l(l2t(cLon,z)+rx/256,z)}};
+function drw(){
   if(!c.width||!c.height)return;
   ctx.fillStyle='#0f172a';ctx.fillRect(0,0,c.width,c.height);
-  const cx=l2t(cLon,z),cy=a2t(cLat,z),cols=Math.ceil(c.width/256)+2,rows=Math.ceil(c.height/256)+2;
+  const rot=(hUp&&flw)?-hdg*Math.PI/180:0;
+  ctx.save();
+  ctx.translate(c.width/2,c.height/2);
+  ctx.rotate(rot);
+  ctx.translate(-c.width/2,-c.height/2);
+
+  const cx=l2t(cLon,z),cy=a2t(cLat,z),diag=Math.hypot(c.width,c.height),cols=Math.ceil(diag/256)+2,rows=Math.ceil(diag/256)+2;
   const base='https://'+'cyberjapandata.gsi.go.jp'+(md==='photo'?'/xyz/seamlessphoto/':'/xyz/std/'),ext=md==='photo'?'jpg':'png';
   for(let x=Math.floor(cx-cols/2);x<=Math.ceil(cx+cols/2);x++)for(let y=Math.floor(cy-rows/2);y<=Math.ceil(cy+rows/2);y++){
     const k=`${md}_${z}/${x}/${y}`,dx=Math.floor(c.width/2+(x-cx)*256),dy=Math.floor(c.height/2+(y-cy)*256);
     if(tc[k]?.ok)ctx.drawImage(tc[k].img,dx,dy,256,256);
-    else if(!tc[k]){const i=new Image();tc[k]={img:i,ok:false};i.onload=()=>{tc[k].ok=true;tOk++;udg();drw()};i.onerror=()=>{tEr++;udg()};i.src=`${base}${z}/${x}/${y}.${ext}`}
+    else if(!tc[k]){const i=new Image();tc[k]={img:i,ok:false};i.onload=()=>{tc[k].ok=true;drw()};i.onerror=()=>{};i.src=`${base}${z}/${x}/${y}.${ext}`}
   }
   if(rc.length){ctx.lineCap='round';ctx.lineJoin='round';[['#fff',12],['#2563eb',8]].forEach(([col,w])=>{ctx.beginPath();ctx.strokeStyle=col;ctx.lineWidth=w;rc.forEach((p,i)=>{const s=ll2s(p.at(1),p.at(0));i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)});ctx.stroke()})}
   if(dLat!==null){const s=ll2s(dLat,dLon);ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(s.x,s.y,10,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke()}
+
+  // 自車位置（進行方向を示す矢印型マーカー）
   const hg=(gLat!==null&&gLon!==null),us=ll2s(hg?gLat:I_LAT,hg?gLon:I_LON);
-  ctx.fillStyle=hg?'#3b82f6':'#94a3b8';ctx.beginPath();ctx.arc(us.x,us.y,11,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke();
+  ctx.save();
+  ctx.translate(us.x,us.y);
+  ctx.rotate(hdg*Math.PI/180);
+  ctx.fillStyle=hg?'#2563eb':'#94a3b8';
+  ctx.beginPath();ctx.moveTo(0,-15);ctx.lineTo(11,12);ctx.lineTo(0,6);ctx.lineTo(-11,12);ctx.closePath();
+  ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2.5;ctx.stroke();
+  ctx.restore();
+  ctx.restore();
 }
 
 let dr=false,sx=0,sy=0,mv=false;
 c.onpointerdown=e=>{dr=true;mv=false;sx=e.clientX;sy=e.clientY};
 c.onpointermove=e=>{
   if(!dr)return;
-  if(Math.abs(e.clientX-sx)>5||Math.abs(e.clientY-sy)>5){mv=true;if(flw){flw=false;updFlw()}}
-  const n=s2ll(c.width/2-(e.clientX-sx),c.height/2-(e.clientY-sy));cLat=n.lat;cLon=n.lon;sx=e.clientX;sy=e.clientY;drw();
+  const dx=e.clientX-sx,dy=e.clientY-sy;
+  if(Math.abs(dx)>5||Math.abs(dy)>5){mv=true;if(flw){flw=false;updFlw()}}
+  const ang=(hUp&&flw)?hdg*Math.PI/180:0,rx=dx*Math.cos(ang)-dy*Math.sin(ang),ry=dx*Math.sin(ang)+dy*Math.cos(ang);
+  const n=s2ll(c.width/2-rx,c.height/2-ry);cLat=n.lat;cLon=n.lon;sx=e.clientX;sy=e.clientY;drw();
 };
 c.onpointerup=e=>{
   dr=false;
   if(!mv&&document.getElementById('ui').style.display!=='none'){
     document.getElementById('res').style.display='none';
     if(nav){document.getElementById('st').innerText="案内中です（変更時は「案内中止」を押してください）";return}
-    const p=s2ll(e.clientX,e.clientY);go(p.lat,p.lon);
+    const p=s2ll(e.clientX,e.clientY);go(p.lat,p.lon,false);
   }
 };
 
 function stpA(){if(curA){curA.pause();curA=null}aq=[];isP=false}
 function ply(f){aq.push(...f);if(!isP)nxtA()}
-function nxtA(){
-  if(!aq.length){isP=false;aSt='再生完了';return udg()}
-  isP=true;const fn=aq.shift();aSt=`再生中(${fn})`;udg();
-  curA=new Audio(fn);
-  curA.onended=nxtA;
-  curA.onerror=()=>{aSt=`エラー(${fn})`;udg();nxtA()};
-  curA.play().catch(e=>{isP=false;aSt=`ブロック(${e.name})`;udg()});
-}
+function nxtA(){if(!aq.length){isP=false;return}isP=true;const fn=aq.shift();curA=new Audio(fn);curA.onended=nxtA;curA.onerror=nxtA;curA.play().catch(()=>{isP=false})}
 
 const dst=(a1,l1,a2,l2)=>6371e3*2*Math.atan2(Math.sqrt(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2),Math.sqrt(1-(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2)));
+const brg=(a1,l1,a2,l2)=>{const y=Math.sin((l2-l1)*Math.PI/180)*Math.cos(a2*Math.PI/180),x=Math.cos(a1*Math.PI/180)*Math.sin(a2*Math.PI/180)-Math.sin(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.cos((l2-l1)*Math.PI/180);return(Math.atan2(y,x)*180/Math.PI+360)%360};
+
+// 現在地からルート線までの最短距離（m）を計算（リルート判定用）
+function offRouteDist(lat,lon){
+  if(rc.length<2)return 0;
+  let minD=999999;
+  for(let i=0;i<rc.length-1;i++){
+    const a1=rc.at(i).at(1),l1=rc.at(i).at(0),a2=rc.at(i+1).at(1),l2=rc.at(i+1).at(0);
+    const dx=l2-l1,dy=a2-a1,len2=dx*dx+dy*dy;
+    let t=len2?((lon-l1)*dx+(lat-a1)*dy)/len2:0;
+    t=Math.max(0,Math.min(1,t));
+    const d=dst(lat,lon,a1+t*dy,l1+t*dx);
+    if(d<minD)minD=d;
+  }
+  return minD;
+}
 
 function init(){
   rsz();
   document.getElementById('splash').style.display='none';
   document.getElementById('ui').style.display='flex';
   document.getElementById('zb').style.display='flex';
-  ply(['Opening.mp3','Start_navigarion.mp3','Safety_Driving.mp3']);
+  ply(opDone?['Start_navigarion.mp3','Safety_Driving.mp3']:['Opening.mp3','Start_navigarion.mp3','Safety_Driving.mp3']);
   navigator.wakeLock?.request('screen').catch(()=>{});
   gps();
 }
 
 function gps(){
-  if(!navigator.geolocation){gSt='非対応';return udg()}
+  if(!navigator.geolocation)return;
   if(wid!==null)navigator.geolocation.clearWatch(wid);
-  gSt='測位中...';udg();
   wid=navigator.geolocation.watchPosition(p=>{
-    gLat=p.coords.latitude;gLon=p.coords.longitude;
+    const nLat=p.coords.latitude,nLon=p.coords.longitude;
+    if(typeof p.coords.heading==='number'&&!isNaN(p.coords.heading)&&p.coords.speed>1){
+      hdg=p.coords.heading;
+    }else if(pLat!==null&&dst(pLat,pLon,nLat,nLon)>=4){
+      hdg=brg(pLat,pLon,nLat,nLon);
+    }
+    pLat=gLat=nLat;pLon=gLon=nLon;
     if(flw){cLat=gLat;cLon=gLon}
-    gSt=`取得済(精度${Math.round(p.coords.accuracy)}m)`;
-    udg();drw();
+    drw();
     if(nav&&rs.length)chk(gLat,gLon);
-  },e=>{gSt=`失敗(${e.code})`;udg()},{enableHighAccuracy:true,maximumAge:5000,timeout:15000});
+  },()=>{},{enableHighAccuracy:true,maximumAge:3000,timeout:15000});
 }
 
 function cnl(){
@@ -183,18 +212,19 @@ async function find(){
       const km=(dst(bA,bL,+item.lat,+item.lon)/1000).toFixed(1);
       const div=document.createElement('div');div.className='item';
       div.innerHTML=`<b>${item.name||q}</b>（約${km}km）<br>${item.display_name}`;
-      div.onclick=()=>{box.style.display='none';go(+item.lat,+item.lon)};
+      div.onclick=()=>{box.style.display='none';go(+item.lat,+item.lon,false)};
       box.appendChild(div);
     });
     box.style.display='flex';
   }catch(e){document.getElementById('st').innerText="検索失敗:"+e.message}
 }
 
-async function go(da,dl){
+async function go(da,dl,isReroute){
   stpA();
   dLat=da;dLon=dl;rec();
   const sA=gLat??I_LAT,sL=gLon??I_LON;
-  document.getElementById('st').innerText="ルート計算中...";
+  document.getElementById('st').innerText=isReroute?"ルートを外れました。再検索中...":"ルート計算中...";
+  if(isReroute)ply(['Route_Research.mp3']);
   const url='https://'+'router.project-osrm.org'+'/route/v1/driving/'+`${sL.toFixed(6)},${sA.toFixed(6)};${dl.toFixed(6)},${da.toFixed(6)}?overview=full&geometries=geojson&steps=true`;
   try{
     const r=await fetch(url);
@@ -202,17 +232,30 @@ async function go(da,dl){
     const d=await r.json();
     if(d.routes?.length){
       const rt=d.routes.at(0);rc=rt.geometry.coordinates;rs=rt.legs.at(0).steps;si=1;af={};nav=true;drw();
-      document.getElementById('st').innerText="ルート案内を開始します";
-      const d1=rs.length>1?dst(sA,sL,rs.at(1).maneuver.location.at(1),rs.at(1).maneuver.location.at(0)):999;
-      ply(d1<=250?['Route_Setup_Complete.mp3']:['Route_Setup_Complete.mp3','Follow_Road.mp3']);
+      document.getElementById('st').innerText=isReroute?"新しいルートで案内します":"ルート案内を開始します";
+      if(!isReroute){
+        const d1=rs.length>1?dst(sA,sL,rs.at(1).maneuver.location.at(1),rs.at(1).maneuver.location.at(0)):999;
+        ply(d1<=250?['Route_Setup_Complete.mp3']:['Route_Setup_Complete.mp3','Follow_Road.mp3']);
+      }
       chk(sA,sL);
     }else document.getElementById('st').innerText="ルートなし";
   }catch(e){document.getElementById('st').innerText="ルート失敗:"+e.message}
 }
 
-function chk(a,l){if(si>=rs.length)return;const s=rs.at(si),d=Math.round(dst(a,l,s.maneuver.location.at(1),s.maneuver.location.at(0))),m=s.maneuver.modifier||'',ac=m.includes('uturn')?'U_Turn.mp3':m.includes('left')?'TurnLeft.mp3':m.includes('right')?'TurnRight.mp3':(s.maneuver.type==='continue'||m.includes('straight'))?'Follow_Road.mp3':null;document.getElementById('st').innerText=`次の案内まで 約${d}m`;if(s.maneuver.type==='arrive'&&d<=40&&!af.ar){af.ar=1;nav=false;document.getElementById('st').innerText="目的地周辺に到着しました";return ply(['Destination_arrived.mp3'])}for(const t of [{d:1500,f:'1.5km.mp3'},{d:1000,f:'1km.mp3'},{d:800,f:'800m.mp3'},{d:400,f:'400m.mp3'},{d:200,f:'200m.mp3'}])if(d<=t.d&&d>t.d-120&&!af[`${si}_${t.d}`]){af[`${si}_${t.d}`]=1;if(ac)ply([t.f,ac]);break}if(d<=40&&!af[`t_${si}`]){af[`t_${si}`]=1;if(ac)ply([ac]);si++}}
+function chk(a,l){
+  if(si>=rs.length)return;
+  // ルートから65m以上外れたら自動リルート（12秒間隔制限）
+  if(dLat!==null&&offRouteDist(a,l)>65&&Date.now()-lastRr>12000){
+    lastRr=Date.now();
+    return go(dLat,dLon,true);
+  }
+  const s=rs.at(si),d=Math.round(dst(a,l,s.maneuver.location.at(1),s.maneuver.location.at(0))),m=s.maneuver.modifier||'',ac=m.includes('uturn')?'U_Turn.mp3':m.includes('left')?'TurnLeft.mp3':m.includes('right')?'TurnRight.mp3':(s.maneuver.type==='continue'||m.includes('straight'))?'Follow_Road.mp3':null;
+  document.getElementById('st').innerText=`次の案内まで 約${d}m`;
+  if(s.maneuver.type==='arrive'&&d<=40&&!af.ar){af.ar=1;nav=false;document.getElementById('st').innerText="目的地周辺に到着しました";return ply(['Destination_arrived.mp3'])}
+  for(const t of [{d:1500,f:'1.5km.mp3'},{d:1000,f:'1km.mp3'},{d:800,f:'800m.mp3'},{d:400,f:'400m.mp3'},{d:200,f:'200m.mp3'}])if(d<=t.d&&d>t.d-120&&!af[`${si}_${t.d}`]){af[`${si}_${t.d}`]=1;if(ac)ply([t.f,ac]);break}
+  if(d<=40&&!af[`t_${si}`]){af[`t_${si}`]=1;if(ac)ply([ac]);si++}
+}
 function sim(){stpA();document.getElementById('st').innerText="疑似走行テスト中";ply(['Route_Setup_Complete.mp3','400m.mp3','TurnRight.mp3','200m.mp3','TurnRight.mp3','Destination_arrived.mp3'])}
 </script>
 </body>
 </html>
-
