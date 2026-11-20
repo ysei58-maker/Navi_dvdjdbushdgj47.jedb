@@ -7,7 +7,7 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body,html{width:100%;height:100%;font-family:sans-serif;background:#111;color:#fff;overflow:hidden}
-#c{position:fixed;inset:0;width:100%;height:100%;z-index:1;touch-action:none}
+#c{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:1;touch-action:none;display:block}
 #ui{position:fixed;top:15px;left:10px;right:10px;z-index:10;background:rgba(0,0,0,.88);padding:12px;border-radius:12px;display:flex;flex-direction:column;gap:8px}
 #st{font-size:15px;font-weight:bold;color:#4ade80;text-align:center}
 .row{display:flex;gap:6px}
@@ -32,7 +32,8 @@ button{padding:10px 14px;border-radius:8px;border:none;font-weight:bold;font-siz
 <script>
 const c=document.getElementById('c'),ctx=c.getContext('2d'),tc={};
 let cLat=32.7525,cLon=129.8705,z=15,uLat=null,uLon=null,dLat=null,dLon=null,rc=[],rs=[],si=0,af={},nav=false;
-const rsz=()=>{c.width=innerWidth;c.height=innerHeight;drw()};addEventListener('resize',rsz);rsz();
+const rsz=()=>{c.width=document.documentElement.clientWidth||window.innerWidth||390;c.height=document.documentElement.clientHeight||window.innerHeight||844;drw()};
+window.addEventListener('load',rsz);window.addEventListener('resize',rsz);setTimeout(rsz,100);
 const zm=d=>{z=Math.max(5,Math.min(18,z+d));drw()};
 const l2t=(l,z)=>(l+180)/360*2**z, a2t=(a,z)=>(1-Math.log(Math.tan(a*Math.PI/180)+1/Math.cos(a*Math.PI/180))/Math.PI)/2*2**z;
 const t2l=(x,z)=>x/2**z*360-180, t2a=(y,z)=>180/Math.PI*Math.atan(.5*(Math.exp(Math.PI-2*Math.PI*y/2**z)-Math.exp(-(Math.PI-2*Math.PI*y/2**z))));
@@ -40,12 +41,13 @@ const ll2s=(a,l)=>({x:c.width/2+(l2t(l,z)-l2t(cLon,z))*256,y:c.height/2+(a2t(a,z
 const s2ll=(x,y)=>({lat:t2a(a2t(cLat,z)+(y-c.height/2)/256,z),lon:t2l(l2t(cLon,z)+(x-c.width/2)/256,z)});
 
 function drw(){
+  if(!c.width||!c.height)return;
   ctx.fillStyle='#1e293b';ctx.fillRect(0,0,c.width,c.height);
   const cx=l2t(cLon,z),cy=a2t(cLat,z),cols=Math.ceil(c.width/256)+2,rows=Math.ceil(c.height/256)+2;
-  for(let x=Math.floor(cx-cols/2);x<cx+cols/2;x++)for(let y=Math.floor(cy-rows/2);y<cy+rows/2;y++){
+  for(let x=Math.floor(cx-cols/2);x<=Math.ceil(cx+cols/2);x++)for(let y=Math.floor(cy-rows/2);y<=Math.ceil(cy+rows/2);y++){
     const k=`${z}/${x}/${y}`,dx=Math.floor(c.width/2+(x-cx)*256),dy=Math.floor(c.height/2+(y-cy)*256);
     if(tc[k]?.complete&&tc[k].naturalWidth)ctx.drawImage(tc[k],dx,dy,256,256);
-    else if(!tc[k]){const i=new Image();i.crossOrigin="anonymous";i.onload=drw;i.src=`https://gsi.go.jp{z}/${x}/${y}.png`;tc[k]=i}
+    else if(!tc[k]){const i=new Image();i.onload=drw;i.src=`https://gsi.go.jp{z}/${x}/${y}.png`;tc[k]=i}
   }
   if(rc.length){ctx.beginPath();ctx.strokeStyle='#2563eb';ctx.lineWidth=8;ctx.lineCap='round';rc.forEach((p,i)=>{const s=ll2s(p.at(1),p.at(0));i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)});ctx.stroke()}
   if(dLat!==null){const s=ll2s(dLat,dLon);ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(s.x,s.y,10,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke()}
@@ -61,7 +63,7 @@ function ply(f){let i=0;const nx=()=>{if(i>=f.length)return;const a=new Audio(f.
 const dst=(a1,l1,a2,l2)=>6371e3*2*Math.atan2(Math.sqrt(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2),Math.sqrt(1-(Math.sin((a2-a1)*Math.PI/360)**2+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin((l2-l1)*Math.PI/360)**2)));
 
 function init(){
-  document.getElementById('btn-s').style.display='none';document.getElementById('sb').style.display='flex';
+  rsz();document.getElementById('btn-s').style.display='none';document.getElementById('sb').style.display='flex';
   document.getElementById('st').innerText="地図タップで目的地設定できます";
   ply(['Start_navigarion.mp3','Safety_Driving.mp3']);
   navigator.wakeLock?.request('screen').catch(()=>{});
